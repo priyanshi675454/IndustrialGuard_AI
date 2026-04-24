@@ -470,8 +470,9 @@ Contributions are welcome! Please follow these steps:
 ## 📞 Support & Contact
 
 - **GitHub Issues**: Report bugs and request features
-- **Email**: priyanshibachhao@gmail.com
-- **Twitter**: [@priyanshi675454](https://twitter.com/priyanshi675454)
+- **Email**: priyanshigajjar46@gmail.com
+- **Twitter**: [@GajjarG78579]
+- **contact**: +918200272432
 
 ---
 
