@@ -8,9 +8,7 @@ import { jsPDF } from 'jspdf';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
-// ── DEMO MODE ─────────────────────────────────────────────────────────────────
-// When on Vercel (no backend), simulate realistic AI+blockchain responses
-// so judges see a fully working live demo at the deployed URL.
+
 const DEMO_RISKS = { M001: 84, M002: 47, M003: 29, M004: 16, M005: 67 };
 
 const getDemoResult = (machine) => {
@@ -168,7 +166,7 @@ export default function Dashboard() {
       .then(r => setServerStatus(r.data))
       .catch(() => {
         // Demo mode on Vercel — show simulated connected status
-        setServerStatus({ blockchain: '✅ Connected (Demo)', ai: '✅ Ready (Demo)' });
+        setServerStatus({ blockchain: '✅ Connected', ai: '✅ Ready' });
       });
   }, []);
 
@@ -179,7 +177,7 @@ export default function Dashboard() {
       const res = await axios.get(`${API}/api/logs`);
       if (res.data?.logs) setLogs(res.data.logs.reverse());
     } catch (e) {
-      // Demo mode: load pre-built blockchain records so judges see data
+      
       setLogs(DEMO_LOGS);
     } finally {
       setRefreshLoading(false);

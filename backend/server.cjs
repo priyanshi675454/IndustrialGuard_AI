@@ -54,11 +54,7 @@ const contractABI = [
 
 const contract = new web3.eth.Contract(contractABI, CONTRACT_ADDRESS);
 
-// ─────────────────────────────────────────────
-//  FIX: API key loaded from environment variable
-//  Set it in terminal: set CLAUDE_API_KEY=sk-ant-...  (Windows)
-//  Or create a .env file and use dotenv
-// ─────────────────────────────────────────────
+
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '89894a7f-8980-48f5-8bbb-e9760a5b13b4';
 
 // ─────────────────────────────────────────────
@@ -181,7 +177,7 @@ app.get('/api/logs', async (req, res) => {
   }
 });
 
-// AI Chat — Claude API with smart fallback
+// AI Chat 
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, machineData } = req.body;
