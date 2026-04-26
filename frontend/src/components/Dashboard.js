@@ -54,9 +54,7 @@ const getDemoChat = (message) => {
   return '🤖 Based on current sensor data: Turbine A (84% risk) needs immediate action. I can help with machine health analysis, maintenance scheduling, risk explanations, and sensor data interpretation. What would you like to know?';
 };
 
-const isDemo = () => {
-  try { return !process.env.REACT_APP_API_URL || process.env.REACT_APP_API_URL.includes('localhost'); } catch { return true; }
-};
+// demo mode active when backend unreachable
 // ──────────────────────────────────────────────────────────────────────────────
 
 const defaultMachines = [
@@ -259,10 +257,20 @@ export default function Dashboard() {
       setCustomResult({ ...payload, name: form.name, ...res.data });
       fetchLogs();
     } catch (e) {
-      // Demo mode: return simulated result
-      const demoRes = getDemoResult({ ...payload, name: form.name });
+      // Demo mode: return simulated result using form values
+      const demoPayload = {
+        machine_id:  form.machine_id,
+        name:        form.name,
+        temperature: parseFloat(form.temperature),
+        vibration:   parseFloat(form.vibration)  || 30,
+        pressure:    parseFloat(form.pressure)   || 100,
+        rpm:         parseFloat(form.rpm)        || 3000,
+        oil_level:   parseFloat(form.oil_level)  || 70,
+        hours_run:   parseFloat(form.hours_run)  || 1000,
+      };
+      const demoRes = getDemoResult(demoPayload);
       setCustomResult(demoRes);
-      setLogs(prev => [{ machineId: payload.machine_id, riskPercent: demoRes.risk_percent, status: demoRes.status, action: demoRes.action, timestamp: new Date().toISOString(), recordedBy: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' }, ...prev]);
+      setLogs(prev => [{ machineId: demoPayload.machine_id, riskPercent: demoRes.risk_percent, status: demoRes.status, action: demoRes.action, timestamp: new Date().toISOString(), recordedBy: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' }, ...prev]);
     }
     setCustomLoading(false);
   };
