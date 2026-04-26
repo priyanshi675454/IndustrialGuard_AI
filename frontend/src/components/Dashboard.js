@@ -1,16 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, LineChart, Line } from 'recharts';
+import {
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, Cell
+} from 'recharts';
 import { jsPDF } from 'jspdf';
+import ReportGenerator from './ReportGenerator';
 
 const API = 'http://localhost:3001';
 
 const defaultMachines = [
-  { machine_id: 'M001', name: 'Turbine A', temperature: 92, vibration: 55, pressure: 125, rpm: 3600, oil_level: 60, hours_run: 3000, sampleRisk: 84, sampleStatus: 'CRITICAL' },
-  { machine_id: 'M002', name: 'Compressor B', temperature: 70, vibration: 30, pressure: 95, rpm: 2800, oil_level: 75, hours_run: 1200, sampleRisk: 47, sampleStatus: 'WARNING' },
-  { machine_id: 'M003', name: 'Pump C', temperature: 88, vibration: 48, pressure: 118, rpm: 3400, oil_level: 55, hours_run: 4100, sampleRisk: 29, sampleStatus: 'NORMAL' },
-  { machine_id: 'M004', name: 'Motor D', temperature: 65, vibration: 22, pressure: 88, rpm: 2500, oil_level: 85, hours_run: 800, sampleRisk: 16, sampleStatus: 'NORMAL' },
-  { machine_id: 'M005', name: 'Generator E', temperature: 95, vibration: 60, pressure: 130, rpm: 3800, oil_level: 45, hours_run: 4800, sampleRisk: 67, sampleStatus: 'WARNING' },
+  { machine_id: 'M001', name: 'Turbine A',    temperature: 92, vibration: 55, pressure: 125, rpm: 3600, oil_level: 60, hours_run: 3000, sampleRisk: 84, sampleStatus: 'CRITICAL' },
+  { machine_id: 'M002', name: 'Compressor B', temperature: 70, vibration: 30, pressure: 95,  rpm: 2800, oil_level: 75, hours_run: 1200, sampleRisk: 47, sampleStatus: 'WARNING'  },
+  { machine_id: 'M003', name: 'Pump C',       temperature: 88, vibration: 48, pressure: 118, rpm: 3400, oil_level: 55, hours_run: 4100, sampleRisk: 29, sampleStatus: 'NORMAL'   },
+  { machine_id: 'M004', name: 'Motor D',      temperature: 65, vibration: 22, pressure: 88,  rpm: 2500, oil_level: 85, hours_run: 800,  sampleRisk: 16, sampleStatus: 'NORMAL'   },
+  { machine_id: 'M005', name: 'Generator E',  temperature: 95, vibration: 60, pressure: 130, rpm: 3800, oil_level: 45, hours_run: 4800, sampleRisk: 67, sampleStatus: 'WARNING'  },
 ];
 
 const QUICK_REPLIES = [
@@ -24,12 +28,15 @@ const QUICK_REPLIES = [
   '💧 What if oil level is low?',
 ];
 
+// FIX #8: risk-based bar color helper
+const riskColor = (pct) => pct >= 70 ? '#ff1744' : pct >= 40 ? '#ff9100' : '#00e676';
+
 const StatusBadge = ({ status, sample }) => {
   const colors = {
     CRITICAL: { bg: '#ff1744', text: 'white' },
-    WARNING: { bg: '#ff9100', text: 'white' },
-    NORMAL: { bg: '#00e676', text: 'black' },
-    ERROR: { bg: '#444', text: 'white' },
+    WARNING:  { bg: '#ff9100', text: 'white' },
+    NORMAL:   { bg: '#00e676', text: 'black' },
+    ERROR:    { bg: '#444',    text: 'white' },
   };
   const color = colors[status] || colors.NORMAL;
   return (
@@ -46,7 +53,7 @@ const StatusBadge = ({ status, sample }) => {
 };
 
 const RiskBar = ({ percent, sample }) => {
-  const color = percent >= 70 ? '#ff1744' : percent >= 40 ? '#ff9100' : '#00e676';
+  const color = riskColor(percent);
   return (
     <div style={{ background: '#1a1f35', borderRadius: '10px', height: '8px', width: '100%' }}>
       <div style={{
@@ -58,36 +65,45 @@ const RiskBar = ({ percent, sample }) => {
   );
 };
 
+// FIX #7: inline error state — no more alert()
+const InlineError = ({ msg }) => msg ? (
+  <div style={{ padding: '8px 12px', background: '#ff174422', border: '1px solid #ff174466',
+    borderRadius: '7px', fontSize: '12px', color: '#ff6b6b', marginTop: '8px' }}>
+    ⚠️ {msg}
+  </div>
+) : null;
+
 const inp = {
   background: '#0a0e1a', border: '1px solid #1a1f35',
   borderRadius: '8px', padding: '9px 13px', color: 'white',
   fontSize: '13px', width: '100%', outline: 'none', boxSizing: 'border-box'
 };
-
 const lbl = { color: '#888', fontSize: '11px', marginBottom: '5px', display: 'block' };
 
 export default function Dashboard() {
-  const [allMachines, setAllMachines] = useState(defaultMachines);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [chartData, setChartData] = useState([]);
-  const [activeTab, setActiveTab] = useState('preset');
-  const [customResult, setCustomResult] = useState(null);
+  const [allMachines,   setAllMachines]   = useState(defaultMachines);
+  const [searchQuery,   setSearchQuery]   = useState('');
+  const [results,       setResults]       = useState([]);
+  const [logs,          setLogs]          = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [chartData,     setChartData]     = useState([]);
+  const [activeTab,     setActiveTab]     = useState('preset');
+  const [customResult,  setCustomResult]  = useState(null);
   const [customLoading, setCustomLoading] = useState(false);
-  const [historyData, setHistoryData] = useState([]);
-  const [scanCount, setScanCount] = useState(0);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState([
+  const [historyData,   setHistoryData]   = useState([]);
+  const [scanCount,     setScanCount]     = useState(0);
+  const [chatOpen,      setChatOpen]      = useState(false);
+  const [chatMessages,  setChatMessages]  = useState([
     { role: 'ai', text: '👋 Hi! I am IndustrialGuard AI Assistant. Ask me anything or pick a quick question below! Run a scan first for live machine data.' }
   ]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [chatInput,      setChatInput]      = useState('');
+  const [chatLoading,    setChatLoading]    = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
-  const [serverStatus, setServerStatus] = useState(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [logSearch, setLogSearch] = useState('');
+  const [serverStatus,   setServerStatus]   = useState(null);
+  const [showAddForm,    setShowAddForm]    = useState(false);
+  const [logSearch,      setLogSearch]      = useState('');
+  const [formError,      setFormError]      = useState(''); // FIX #7
+
   const chatEndRef = useRef(null);
 
   const [form, setForm] = useState({
@@ -95,19 +111,35 @@ export default function Dashboard() {
     vibration: '', pressure: '', rpm: '', oil_level: '', hours_run: '',
   });
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   useEffect(() => {
-    axios.get(`${API}/api/health`).then(r => setServerStatus(r.data)).catch(() =>
-      setServerStatus({ blockchain: '❌ Disconnected', ai: '❌ Down' })
-    );
+    axios.get(`${API}/api/health`)
+      .then(r => setServerStatus(r.data))
+      .catch(() => setServerStatus({ blockchain: '❌ Disconnected', ai: '❌ Down' }));
   }, []);
 
+  // FIX #1: wrap fetchLogs in useCallback so it can be a safe dependency
+  const fetchLogs = useCallback(async () => {
+    setRefreshLoading(true);
+    try {
+      const res = await axios.get(`${API}/api/logs`);
+      if (res.data?.logs) setLogs(res.data.logs.reverse());
+    } catch (e) {
+      // silently ignore — logs section shows empty state
+    } finally {
+      setRefreshLoading(false);
+    }
+  }, []);
+
+  // FIX #1: fetchLogs now properly in dependency array
   useEffect(() => {
     fetchLogs();
     const iv = setInterval(fetchLogs, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [fetchLogs]);
 
   const filteredMachines = allMachines.filter(m =>
     m.machine_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -119,52 +151,61 @@ export default function Dashboard() {
     l.status?.toLowerCase().includes(logSearch.toLowerCase())
   );
 
-  const handleFormChange = e => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleFormChange = e => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    setFormError(''); // clear error on type
+  };
 
+  // FIX #7: replaced alert() with inline error state
   const addMachineToList = () => {
     if (!form.machine_id || !form.name || !form.temperature) {
-      alert('Machine ID, Name, and Temperature are required!'); return;
+      setFormError('Machine ID, Name, and Temperature are required!');
+      return;
     }
     if (allMachines.find(m => m.machine_id === form.machine_id)) {
-      alert(`Machine ID ${form.machine_id} already exists!`); return;
+      setFormError(`Machine ID "${form.machine_id}" already exists!`);
+      return;
     }
     const nm = {
-      machine_id: form.machine_id, name: form.name,
+      machine_id: form.machine_id,
+      name:       form.name,
       temperature: parseFloat(form.temperature),
-      vibration: parseFloat(form.vibration) || 30,
-      pressure: parseFloat(form.pressure) || 100,
-      rpm: parseFloat(form.rpm) || 3000,
-      oil_level: parseFloat(form.oil_level) || 70,
-      hours_run: parseFloat(form.hours_run) || 1000,
+      vibration:   parseFloat(form.vibration)  || 30,
+      pressure:    parseFloat(form.pressure)   || 100,
+      rpm:         parseFloat(form.rpm)        || 3000,
+      oil_level:   parseFloat(form.oil_level)  || 70,
+      hours_run:   parseFloat(form.hours_run)  || 1000,
       sampleRisk: null, sampleStatus: null
     };
     setAllMachines(prev => [...prev, nm]);
     setForm({ machine_id: '', name: '', temperature: '', vibration: '', pressure: '', rpm: '', oil_level: '', hours_run: '' });
     setShowAddForm(false);
-    alert(`✅ ${nm.name} added! Click "Scan All" to analyze it.`);
+    setFormError('');
   };
 
   const analyzeCustom = async () => {
     if (!form.machine_id || !form.name || !form.temperature) {
-      alert('Machine ID, Name, and Temperature are required!'); return;
+      setFormError('Machine ID, Name, and Temperature are required!');
+      return;
     }
+    setFormError('');
     setCustomLoading(true);
     setCustomResult(null);
     try {
       const payload = {
-        machine_id: form.machine_id,
+        machine_id:  form.machine_id,
         temperature: parseFloat(form.temperature),
-        vibration: parseFloat(form.vibration) || 30,
-        pressure: parseFloat(form.pressure) || 100,
-        rpm: parseFloat(form.rpm) || 3000,
-        oil_level: parseFloat(form.oil_level) || 70,
-        hours_run: parseFloat(form.hours_run) || 1000,
+        vibration:   parseFloat(form.vibration)  || 30,
+        pressure:    parseFloat(form.pressure)   || 100,
+        rpm:         parseFloat(form.rpm)        || 3000,
+        oil_level:   parseFloat(form.oil_level)  || 70,
+        hours_run:   parseFloat(form.hours_run)  || 1000,
       };
       const res = await axios.post(`${API}/api/analyze`, payload);
       setCustomResult({ ...payload, name: form.name, ...res.data });
       fetchLogs();
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.error || e.message));
+      setFormError(e.response?.data?.error || e.message || 'Analysis failed');
     }
     setCustomLoading(false);
   };
@@ -172,65 +213,81 @@ export default function Dashboard() {
   const analyzeAll = async () => {
     setLoading(true);
     const newResults = [];
+
     for (const machine of allMachines) {
       try {
         const res = await axios.post(`${API}/api/analyze`, machine);
         newResults.push({ ...machine, ...res.data });
       } catch (e) {
-        newResults.push({ ...machine, status: 'ERROR', risk_percent: 0, action: 'Check that AI server is running (cd ai → python predict.py)' });
+        newResults.push({
+          ...machine,
+          status: 'ERROR', risk_percent: 0,
+          action: 'Check AI server is running: cd AI → python predict.py'
+        });
       }
     }
+
     setResults(newResults);
-    setChartData(newResults.filter(r => r.status !== 'ERROR').map(r => ({ name: r.name, risk: r.risk_percent })));
-    setScanCount(prev => prev + 1);
-    const entry = { scan: `Scan ${scanCount + 1}` };
-    newResults.filter(r => r.status !== 'ERROR').forEach(r => { entry[r.name] = r.risk_percent; });
-    setHistoryData(prev => [...prev, entry]);
+    setChartData(
+      newResults
+        .filter(r => r.status !== 'ERROR')
+        .map(r => ({ name: r.name, risk: r.risk_percent }))
+    );
+
+    // FIX #3 + #4: build history entry inside setScanCount updater to get correct count
+    setScanCount(prev => {
+      const next  = prev + 1;
+      const entry = { scan: `Scan ${next}` };
+      newResults
+        .filter(r => r.status !== 'ERROR')
+        .forEach(r => { entry[r.name] = r.risk_percent; });
+      setHistoryData(h => [...h, entry]);
+      return next;
+    });
+
     setLoading(false);
     fetchLogs();
-  };
-
-  const fetchLogs = async () => {
-    setRefreshLoading(true);
-    try {
-      const res = await axios.get(`${API}/api/logs`);
-      if (res.data?.logs) setLogs(res.data.logs.reverse());
-    } catch (e) { } finally { setRefreshLoading(false); }
   };
 
   const generateWorkOrder = (machine) => {
     const doc = new jsPDF();
     const now = new Date().toLocaleString();
-    doc.setFillColor(10, 14, 26); doc.rect(0, 0, 210, 297, 'F');
-    doc.setTextColor(0, 229, 255); doc.setFontSize(20); doc.text('INDUSTRIALGUARD AI', 20, 25);
+    doc.setFillColor(10, 14, 26);
+    doc.rect(0, 0, 210, 297, 'F');
+    doc.setTextColor(0, 229, 255);   doc.setFontSize(20); doc.text('INDUSTRIALGUARD AI', 20, 25);
     doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.text('MAINTENANCE WORK ORDER', 20, 36);
-    doc.setDrawColor(0, 229, 255); doc.line(20, 40, 190, 40);
+    doc.setDrawColor(0, 229, 255);   doc.line(20, 40, 190, 40);
     doc.setFontSize(10); doc.setTextColor(150, 150, 150);
-    doc.text('Generated: ' + now, 20, 50); doc.text('WO#: WO-' + Date.now(), 20, 57);
+    doc.text('Generated: ' + now, 20, 50);
+    doc.text('WO#: WO-' + Date.now(), 20, 57);
     doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.text('MACHINE DETAILS', 20, 70);
     doc.setFontSize(10); doc.setTextColor(200, 200, 200);
-    doc.text('ID: ' + machine.machine_id, 20, 82); doc.text('Name: ' + machine.name, 20, 90);
-    doc.text('Status: ' + machine.status, 20, 98); doc.text('Risk: ' + machine.risk_percent + '%', 20, 106);
+    doc.text('ID: '     + machine.machine_id,  20, 82);
+    doc.text('Name: '   + machine.name,        20, 90);
+    doc.text('Status: ' + machine.status,      20, 98);
+    doc.text('Risk: '   + machine.risk_percent + '%', 20, 106);
     doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.text('SENSOR READINGS', 20, 120);
     doc.setFontSize(10); doc.setTextColor(200, 200, 200);
     doc.text('Temperature: ' + machine.temperature + 'C', 20, 132);
-    doc.text('Vibration: ' + machine.vibration + ' Hz', 20, 140);
-    doc.text('Pressure: ' + machine.pressure + ' bar', 20, 148);
-    doc.text('RPM: ' + machine.rpm, 20, 156);
-    doc.text('Oil Level: ' + machine.oil_level + '%', 20, 164);
-    doc.text('Hours Run: ' + machine.hours_run, 20, 172);
+    doc.text('Vibration: '   + machine.vibration   + ' Hz', 20, 140);
+    doc.text('Pressure: '    + machine.pressure    + ' bar', 20, 148);
+    doc.text('RPM: '         + machine.rpm,         20, 156);
+    doc.text('Oil Level: '   + machine.oil_level   + '%', 20, 164);
+    doc.text('Hours Run: '   + machine.hours_run,   20, 172);
     doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.text('ACTION REQUIRED', 20, 186);
-    doc.setFontSize(10); doc.setTextColor(255, 23, 68); doc.text(machine.action || 'Immediate maintenance required!', 20, 198);
+    doc.setFontSize(10); doc.setTextColor(255, 23, 68);
+    doc.text(machine.action || 'Immediate maintenance required!', 20, 198);
     doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.text('BLOCKCHAIN VERIFICATION', 20, 215);
     doc.setFontSize(10); doc.setTextColor(0, 230, 118);
     doc.text('Record permanently logged on blockchain', 20, 227);
-    doc.text('Tamper-proof audit trail verified', 20, 235);
+    doc.text('Tamper-proof audit trail verified',       20, 235);
     doc.setDrawColor(0, 229, 255); doc.line(20, 265, 190, 265);
     doc.setTextColor(80, 80, 80); doc.setFontSize(8);
     doc.text('IndustrialGuard AI - Powered by ML + Blockchain', 20, 274);
     doc.save(`WO_${machine.machine_id}_${Date.now()}.pdf`);
   };
 
+  // FIX #2: better error message in chat
   const sendChat = async (override) => {
     const msg = override || chatInput;
     if (!msg.trim() || chatLoading) return;
@@ -238,23 +295,30 @@ export default function Dashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setChatLoading(true);
     try {
-      const res = await axios.post(`${API}/api/chat`, { message: msg, machineData: results.length > 0 ? results : allMachines });
+      const res = await axios.post(`${API}/api/chat`, {
+        message: msg,
+        machineData: results.length > 0 ? results : allMachines
+      });
       setChatMessages(prev => [...prev, { role: 'ai', text: res.data.reply }]);
     } catch (e) {
-      setChatMessages(prev => [...prev, { role: 'ai', text: '⚠️ Could not connect. Make sure backend is running on port 3001!' }]);
+      const errMsg = e.response?.data?.error || e.message || 'Backend unreachable on port 3001';
+      setChatMessages(prev => [...prev, {
+        role: 'ai',
+        text: `⚠️ Error: ${errMsg}. Make sure "node server.cjs" is running in the backend folder.`
+      }]);
     }
     setChatLoading(false);
   };
 
   const critical = results.filter(r => r.status === 'CRITICAL').length;
-  const warning = results.filter(r => r.status === 'WARNING').length;
-  const normal = results.filter(r => r.status === 'NORMAL').length;
-  const scanned = results.length > 0;
+  const warning  = results.filter(r => r.status === 'WARNING').length;
+  const normal   = results.filter(r => r.status === 'NORMAL').length;
+  const scanned  = results.length > 0;
 
   return (
     <div style={{ padding: '18px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#00e5ff', margin: 0 }}>⚙️ IndustrialGuard AI</h1>
@@ -271,7 +335,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Tabs */}
+      {/* ── Tabs ── */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '18px' }}>
         {[{ k: 'preset', l: '🏭 All Machines' }, { k: 'custom', l: '🔬 Analyze Machine' }].map(t => (
           <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
@@ -283,7 +347,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* ═══ ALL MACHINES TAB ═══ */}
+      {/* ══════════════════ ALL MACHINES TAB ══════════════════ */}
       {activeTab === 'preset' && (<>
 
         {/* Search + Buttons */}
@@ -294,15 +358,17 @@ export default function Dashboard() {
               onChange={e => setSearchQuery(e.target.value)}
               style={{ ...inp, paddingLeft: '34px' }} />
           </div>
-          <button onClick={() => setShowAddForm(!showAddForm)} style={{
-            background: showAddForm ? '#2a1535' : '#111827', color: showAddForm ? '#ff9100' : '#00e5ff',
+          <button onClick={() => { setShowAddForm(!showAddForm); setFormError(''); }} style={{
+            background: showAddForm ? '#2a1535' : '#111827',
+            color: showAddForm ? '#ff9100' : '#00e5ff',
             border: `1px solid ${showAddForm ? '#ff9100' : '#00e5ff'}`,
             padding: '9px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
           }}>{showAddForm ? '✕ Cancel' : '➕ Add Machine'}</button>
           <button onClick={analyzeAll} disabled={loading} style={{
             background: loading ? '#333' : 'linear-gradient(135deg, #00e5ff, #0091ea)',
             color: loading ? '#888' : 'white', border: 'none',
-            padding: '9px 20px', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer',
+            padding: '9px 20px', borderRadius: '8px',
+            cursor: loading ? 'not-allowed' : 'pointer',
             fontSize: '13px', fontWeight: 'bold'
           }}>{loading ? '🔄 Scanning...' : `🚀 Scan All (${allMachines.length})`}</button>
         </div>
@@ -332,27 +398,30 @@ export default function Dashboard() {
             <h3 style={{ color: '#00e5ff', marginBottom: '14px', fontSize: '14px' }}>➕ Register New Machine</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '10px' }}>
               {[
-                { label: 'Machine ID *', name: 'machine_id', placeholder: 'e.g. MD109' },
-                { label: 'Machine Name *', name: 'name', placeholder: 'e.g. Boiler X' },
-                { label: 'Temperature °C *', name: 'temperature', placeholder: '85' },
-                { label: 'Vibration Hz', name: 'vibration', placeholder: '40' },
-                { label: 'Pressure bar', name: 'pressure', placeholder: '110' },
-                { label: 'RPM', name: 'rpm', placeholder: '3200' },
-                { label: 'Oil Level %', name: 'oil_level', placeholder: '65' },
-                { label: 'Hours Run', name: 'hours_run', placeholder: '2500' },
+                { label: 'Machine ID *',    name: 'machine_id', placeholder: 'e.g. MD109'   },
+                { label: 'Machine Name *',  name: 'name',       placeholder: 'e.g. Boiler X' },
+                { label: 'Temperature °C *',name: 'temperature',placeholder: '85'            },
+                { label: 'Vibration Hz',    name: 'vibration',  placeholder: '40'            },
+                { label: 'Pressure bar',    name: 'pressure',   placeholder: '110'           },
+                { label: 'RPM',             name: 'rpm',        placeholder: '3200'          },
+                { label: 'Oil Level %',     name: 'oil_level',  placeholder: '65'            },
+                { label: 'Hours Run',       name: 'hours_run',  placeholder: '2500'          },
               ].map(f => (
                 <div key={f.name}>
                   <label style={lbl}>{f.label}</label>
-                  <input type={['machine_id', 'name'].includes(f.name) ? 'text' : 'number'}
-                    name={f.name} placeholder={f.placeholder} value={form[f.name]}
-                    onChange={handleFormChange} style={inp} />
+                  <input
+                    type={['machine_id', 'name'].includes(f.name) ? 'text' : 'number'}
+                    name={f.name} placeholder={f.placeholder}
+                    value={form[f.name]} onChange={handleFormChange} style={inp} />
                 </div>
               ))}
             </div>
+            <InlineError msg={formError} />
             <div style={{ display: 'flex', gap: '10px', marginTop: '12px', alignItems: 'center' }}>
               <button onClick={addMachineToList} style={{
                 background: 'linear-gradient(135deg, #00e5ff, #0091ea)', color: 'white',
-                border: 'none', padding: '9px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
+                border: 'none', padding: '9px 20px', borderRadius: '8px',
+                cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
               }}>✅ Add to List</button>
               <p style={{ color: '#555', fontSize: '12px', margin: 0 }}>Then click "Scan All" to analyze</p>
             </div>
@@ -362,18 +431,18 @@ export default function Dashboard() {
         {/* Sample Data Notice */}
         {!scanned && (
           <div style={{ padding: '10px 14px', background: '#0a1628', borderRadius: '8px', marginBottom: '14px', border: '1px solid #1a3a5c', fontSize: '12px', color: '#6a9fd8' }}>
-            👁️ Showing <strong>sample preview data</strong> — click <strong>"Scan All"</strong> to get real AI predictions from your sensors
+            👁️ Showing <strong>sample preview data</strong> — click <strong>"Scan All"</strong> to get real AI predictions
           </div>
         )}
 
-        {/* Stats Cards — shown after scan */}
+        {/* Stats Cards */}
         {scanned && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginBottom: '16px' }}>
             {[
-              { l: 'Total', v: results.length, c: '#00e5ff', i: '🏭' },
-              { l: 'Critical', v: critical, c: '#ff1744', i: '🚨' },
-              { l: 'Warning', v: warning, c: '#ff9100', i: '⚠️' },
-              { l: 'Normal', v: normal, c: '#00e676', i: '✅' },
+              { l: 'Total',    v: results.length, c: '#00e5ff', i: '🏭' },
+              { l: 'Critical', v: critical,        c: '#ff1744', i: '🚨' },
+              { l: 'Warning',  v: warning,         c: '#ff9100', i: '⚠️' },
+              { l: 'Normal',   v: normal,          c: '#00e676', i: '✅' },
             ].map((card, i) => (
               <div key={i} style={{ background: '#111827', borderRadius: '10px', padding: '14px', borderLeft: `3px solid ${card.c}` }}>
                 <div style={{ fontSize: '20px' }}>{card.i}</div>
@@ -393,16 +462,23 @@ export default function Dashboard() {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '12px', marginBottom: '18px' }}>
             {filteredMachines.map((machine, i) => {
-              const result = results.find(r => r.machine_id === machine.machine_id);
+              const result  = results.find(r => r.machine_id === machine.machine_id);
               const isSample = !result;
-              const riskPct = result ? result.risk_percent : machine.sampleRisk;
-              const status = result ? result.status : machine.sampleStatus;
-              const action = result ? result.action : (status === 'CRITICAL' ? 'Immediate maintenance required!' : status === 'WARNING' ? 'Schedule maintenance soon.' : 'Machine operating normally.');
+              const riskPct  = result ? result.risk_percent : machine.sampleRisk;
+              const status   = result ? result.status       : machine.sampleStatus;
+              const action   = result ? result.action
+                : (status === 'CRITICAL' ? 'Immediate maintenance required!'
+                  : status === 'WARNING'  ? 'Schedule maintenance soon.'
+                  : 'Machine operating normally.');
 
               return (
                 <div key={i} style={{
                   background: '#111827', borderRadius: '12px', padding: '16px',
-                  border: `1px solid ${status === 'CRITICAL' ? (isSample ? '#ff174455' : '#ff1744') : status === 'WARNING' ? (isSample ? '#ff910055' : '#ff9100') : '#1a1f35'}`,
+                  border: `1px solid ${
+                    status === 'CRITICAL' ? (isSample ? '#ff174455' : '#ff1744')
+                    : status === 'WARNING' ? (isSample ? '#ff910055' : '#ff9100')
+                    : '#1a1f35'
+                  }`,
                   position: 'relative', transition: 'border 0.3s'
                 }}>
                   {isSample && (
@@ -422,7 +498,7 @@ export default function Dashboard() {
                     <div style={{ marginBottom: '10px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                         <span style={{ color: '#888', fontSize: '12px' }}>Failure Risk</span>
-                        <span style={{ fontWeight: 'bold', fontSize: '13px', opacity: isSample ? 0.6 : 1, color: riskPct >= 70 ? '#ff1744' : riskPct >= 40 ? '#ff9100' : '#00e676' }}>
+                        <span style={{ fontWeight: 'bold', fontSize: '13px', opacity: isSample ? 0.6 : 1, color: riskColor(riskPct) }}>
                           {riskPct}%{isSample ? ' ~' : ''}
                         </span>
                       </div>
@@ -438,7 +514,11 @@ export default function Dashboard() {
                   </div>
 
                   <div style={{ padding: '6px 8px', background: '#0a0e1a', borderRadius: '6px', fontSize: '11px', color: '#888', marginBottom: '6px' }}>
-                    {isSample ? '🔍 Click "Scan All" for real AI prediction' : result?.blockchain_logged ? '🔗 Blockchain Logged ✅' : '⚠️ Blockchain unavailable'}
+                    {isSample
+                      ? '🔍 Click "Scan All" for real AI prediction'
+                      : result?.blockchain_logged
+                        ? '🔗 Blockchain Logged ✅'
+                        : '⚠️ Blockchain unavailable — check hardhat node'}
                   </div>
 
                   <div style={{ fontSize: '11px', color: '#777', marginBottom: isSample ? 0 : '8px' }}>
@@ -447,7 +527,8 @@ export default function Dashboard() {
 
                   {!isSample && result.status !== 'NORMAL' && result.status !== 'ERROR' && (
                     <button onClick={() => generateWorkOrder(result)} style={{
-                      width: '100%', background: 'linear-gradient(135deg, #ff1744, #c62828)',
+                      width: '100%',
+                      background: 'linear-gradient(135deg, #ff1744, #c62828)',
                       color: 'white', border: 'none', padding: '7px',
                       borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginTop: '4px'
                     }}>📄 Download Work Order PDF</button>
@@ -458,7 +539,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Bar Chart */}
+        {/* FIX #8: Bar Chart with risk-based colors per bar */}
         {chartData.length > 0 && (
           <div style={{ background: '#111827', borderRadius: '12px', padding: '18px', marginBottom: '16px' }}>
             <h2 style={{ marginBottom: '12px', color: '#00e5ff', fontSize: '15px' }}>📊 Risk Analysis Chart</h2>
@@ -467,8 +548,15 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1f35" />
                 <XAxis dataKey="name" stroke="#888" tick={{ fontSize: 11 }} />
                 <YAxis stroke="#888" domain={[0, 100]} tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1a1f35', fontSize: '12px' }} />
-                <Bar dataKey="risk" fill="#00e5ff" radius={[4, 4, 0, 0]} name="Risk %" />
+                <Tooltip
+                  contentStyle={{ background: '#111827', border: '1px solid #1a1f35', fontSize: '12px' }}
+                  formatter={(value) => [`${value}%`, 'Risk']}
+                />
+                <Bar dataKey="risk" radius={[4, 4, 0, 0]} name="Risk %">
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={riskColor(entry.risk)} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -486,7 +574,10 @@ export default function Dashboard() {
                 <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1a1f35', fontSize: '12px' }} />
                 {allMachines.map((m, i) => {
                   const cols = ['#ff1744', '#ff9100', '#00e5ff', '#00e676', '#d500f9', '#ffea00', '#ff6d00'];
-                  return <Line key={m.name} type="monotone" dataKey={m.name} stroke={cols[i % cols.length]} strokeWidth={2} dot={true} />;
+                  return (
+                    <Line key={m.name} type="monotone" dataKey={m.name}
+                      stroke={cols[i % cols.length]} strokeWidth={2} dot={true} />
+                  );
                 })}
               </LineChart>
             </ResponsiveContainer>
@@ -500,25 +591,28 @@ export default function Dashboard() {
         )}
       </>)}
 
-      {/* ═══ ANALYZE MACHINE TAB ═══ */}
+      {/* ══════════════════ ANALYZE MACHINE TAB ══════════════════ */}
       {activeTab === 'custom' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px,1fr) minmax(280px,1fr)', gap: '18px', marginBottom: '18px' }}>
+
+          {/* Input Form */}
           <div style={{ background: '#111827', borderRadius: '12px', padding: '20px' }}>
             <h2 style={{ color: '#00e5ff', marginBottom: '16px', fontSize: '15px' }}>🔬 Enter Machine Details</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               {[
-                { label: 'Machine ID *', name: 'machine_id', placeholder: 'e.g. MD45' },
-                { label: 'Machine Name *', name: 'name', placeholder: 'e.g. Boiler Unit' },
-                { label: 'Temperature °C *', name: 'temperature', placeholder: '85' },
-                { label: 'Vibration Hz', name: 'vibration', placeholder: '40' },
-                { label: 'Pressure bar', name: 'pressure', placeholder: '110' },
-                { label: 'RPM', name: 'rpm', placeholder: '3200' },
-                { label: 'Oil Level %', name: 'oil_level', placeholder: '65' },
-                { label: 'Hours Run', name: 'hours_run', placeholder: '2500' },
+                { label: 'Machine ID *',    name: 'machine_id', placeholder: 'e.g. MD45'       },
+                { label: 'Machine Name *',  name: 'name',       placeholder: 'e.g. Boiler Unit' },
+                { label: 'Temperature °C *',name: 'temperature',placeholder: '85'               },
+                { label: 'Vibration Hz',    name: 'vibration',  placeholder: '40'               },
+                { label: 'Pressure bar',    name: 'pressure',   placeholder: '110'              },
+                { label: 'RPM',             name: 'rpm',        placeholder: '3200'             },
+                { label: 'Oil Level %',     name: 'oil_level',  placeholder: '65'               },
+                { label: 'Hours Run',       name: 'hours_run',  placeholder: '2500'             },
               ].map(f => (
                 <div key={f.name}>
                   <label style={lbl}>{f.label}</label>
-                  <input type={['machine_id', 'name'].includes(f.name) ? 'text' : 'number'}
+                  <input
+                    type={['machine_id', 'name'].includes(f.name) ? 'text' : 'number'}
                     name={f.name} placeholder={f.placeholder}
                     value={form[f.name]} onChange={handleFormChange} style={inp} />
                 </div>
@@ -527,26 +621,33 @@ export default function Dashboard() {
             <div style={{ marginTop: '12px', padding: '9px', background: '#0a0e1a', borderRadius: '7px', fontSize: '11px', color: '#666' }}>
               💡 Only Machine ID, Name, and Temperature are required. Others use safe defaults.
             </div>
+            <InlineError msg={formError} />
             <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               <button onClick={analyzeCustom} disabled={customLoading} style={{
-                flex: 1, background: customLoading ? '#333' : 'linear-gradient(135deg, #00e5ff, #0091ea)',
+                flex: 1,
+                background: customLoading ? '#333' : 'linear-gradient(135deg, #00e5ff, #0091ea)',
                 color: customLoading ? '#888' : 'white', border: 'none', padding: '11px',
                 borderRadius: '8px', cursor: customLoading ? 'not-allowed' : 'pointer',
                 fontSize: '13px', fontWeight: 'bold'
               }}>{customLoading ? '🔄 Analyzing...' : '🚀 Analyze Now'}</button>
               <button onClick={addMachineToList} style={{
                 background: '#111827', color: '#00e5ff',
-                border: '1px solid #00e5ff', padding: '11px 14px', borderRadius: '8px',
-                cursor: 'pointer', fontSize: '12px', fontWeight: 'bold'
+                border: '1px solid #00e5ff', padding: '11px 14px',
+                borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold'
               }}>➕ Save</button>
             </div>
           </div>
 
+          {/* Result Panel */}
           <div>
             {customResult ? (
               <div style={{
                 background: '#111827', borderRadius: '12px', padding: '20px',
-                border: `2px solid ${customResult.status === 'CRITICAL' ? '#ff1744' : customResult.status === 'WARNING' ? '#ff9100' : '#00e676'}`
+                border: `2px solid ${
+                  customResult.status === 'CRITICAL' ? '#ff1744'
+                  : customResult.status === 'WARNING' ? '#ff9100'
+                  : '#00e676'
+                }`
               }}>
                 <h2 style={{ color: '#00e5ff', marginBottom: '14px', fontSize: '15px' }}>📋 AI Analysis Result</h2>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -559,7 +660,7 @@ export default function Dashboard() {
                 <div style={{ marginBottom: '14px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                     <span style={{ color: '#888', fontSize: '12px' }}>Failure Risk</span>
-                    <span style={{ fontSize: '24px', fontWeight: 'bold', color: customResult.risk_percent >= 70 ? '#ff1744' : customResult.risk_percent >= 40 ? '#ff9100' : '#00e676' }}>
+                    <span style={{ fontSize: '24px', fontWeight: 'bold', color: riskColor(customResult.risk_percent) }}>
                       {customResult.risk_percent}%
                     </span>
                   </div>
@@ -567,12 +668,12 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
                   {[
-                    { i: '🌡️', l: 'Temp', v: `${customResult.temperature}°C` },
-                    { i: '📳', l: 'Vibration', v: `${customResult.vibration} Hz` },
-                    { i: '🔵', l: 'Pressure', v: `${customResult.pressure} bar` },
-                    { i: '⚡', l: 'RPM', v: customResult.rpm },
-                    { i: '💧', l: 'Oil Level', v: `${customResult.oil_level}%` },
-                    { i: '⏱️', l: 'Hours', v: `${customResult.hours_run} hrs` },
+                    { i: '🌡️', l: 'Temp',     v: `${customResult.temperature}°C`    },
+                    { i: '📳', l: 'Vibration', v: `${customResult.vibration} Hz`     },
+                    { i: '🔵', l: 'Pressure',  v: `${customResult.pressure} bar`     },
+                    { i: '⚡', l: 'RPM',       v: customResult.rpm                   },
+                    { i: '💧', l: 'Oil Level', v: `${customResult.oil_level}%`       },
+                    { i: '⏱️', l: 'Hours',     v: `${customResult.hours_run} hrs`    },
                   ].map((x, i) => (
                     <div key={i} style={{ background: '#0a0e1a', borderRadius: '7px', padding: '9px' }}>
                       <div style={{ color: '#888', fontSize: '10px' }}>{x.i} {x.l}</div>
@@ -582,18 +683,21 @@ export default function Dashboard() {
                 </div>
                 <div style={{ padding: '10px', background: '#0a0e1a', borderRadius: '7px', marginBottom: '8px' }}>
                   <div style={{ color: '#888', fontSize: '10px', marginBottom: '3px' }}>📋 Recommended Action</div>
-                  <div style={{ fontWeight: 'bold', fontSize: '12px', color: customResult.status === 'CRITICAL' ? '#ff1744' : customResult.status === 'WARNING' ? '#ff9100' : '#00e676' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '12px', color: riskColor(customResult.risk_percent) }}>
                     {customResult.action}
                   </div>
                 </div>
                 <div style={{ padding: '9px', background: '#0a0e1a', borderRadius: '7px', fontSize: '11px', marginBottom: '10px' }}>
                   🔗 <span style={{ color: customResult.blockchain_logged ? '#00e676' : '#ff9100' }}>
-                    {customResult.blockchain_logged ? 'Logged on Blockchain ✅' : 'Blockchain unavailable ⚠️'}
+                    {customResult.blockchain_logged
+                      ? 'Logged on Blockchain ✅'
+                      : 'Blockchain unavailable ⚠️ — check hardhat node'}
                   </span>
                 </div>
                 {customResult.status !== 'NORMAL' && (
                   <button onClick={() => generateWorkOrder(customResult)} style={{
-                    width: '100%', background: 'linear-gradient(135deg, #ff1744, #c62828)',
+                    width: '100%',
+                    background: 'linear-gradient(135deg, #ff1744, #c62828)',
                     color: 'white', border: 'none', padding: '9px',
                     borderRadius: '7px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold'
                   }}>📄 Download Work Order PDF</button>
@@ -622,7 +726,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Blockchain Logs */}
+      {/* ── Blockchain Logs ── */}
       <div style={{ background: '#111827', borderRadius: '12px', padding: '18px', marginBottom: '80px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
           <h2 style={{ color: '#00e5ff', fontSize: '15px', margin: 0 }}>🔗 Blockchain Audit Log ({logs.length} records)</h2>
@@ -638,7 +742,9 @@ export default function Dashboard() {
         </div>
         {filteredLogs.length === 0 ? (
           <p style={{ color: '#555', textAlign: 'center', padding: '24px', fontSize: '13px' }}>
-            {logs.length === 0 ? '📭 No records yet — run a scan to start logging!' : 'No logs match your search.'}
+            {logs.length === 0
+              ? '📭 No records yet — run a scan to start logging!'
+              : 'No logs match your search.'}
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -654,13 +760,15 @@ export default function Dashboard() {
                 {filteredLogs.map((log, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #1a1f3522' }}>
                     <td style={{ padding: '9px 10px', fontWeight: 'bold', color: '#00e5ff' }}>{log.machineId}</td>
-                    <td style={{ padding: '9px 10px', fontWeight: 'bold', color: log.riskPercent >= 70 ? '#ff1744' : log.riskPercent >= 40 ? '#ff9100' : '#00e676' }}>
+                    <td style={{ padding: '9px 10px', fontWeight: 'bold', color: riskColor(log.riskPercent) }}>
                       {log.riskPercent}%
                     </td>
                     <td style={{ padding: '9px 10px' }}><StatusBadge status={log.status} /></td>
                     <td style={{ padding: '9px 10px', color: '#888' }}>{log.action}</td>
                     <td style={{ padding: '9px 10px', color: '#666', fontSize: '11px' }}>{log.timestamp}</td>
-                    <td style={{ padding: '9px 10px', color: '#666', fontSize: '10px' }}>{log.recordedBy?.slice(0, 10)}...</td>
+                    <td style={{ padding: '9px 10px', color: '#666', fontSize: '10px' }}>
+                      {log.recordedBy?.slice(0, 10)}...
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -669,7 +777,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* ═══ AI CHATBOT ═══ */}
+      {/* ══════════════════ AI CHATBOT ══════════════════ */}
       <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 1000 }}>
         {chatOpen && (
           <div style={{
@@ -678,7 +786,7 @@ export default function Dashboard() {
             borderRadius: '14px', border: '1px solid #1a1f35',
             boxShadow: '0 20px 60px rgba(0,0,0,0.7)', overflow: 'hidden'
           }}>
-            {/* Header */}
+            {/* Chat Header */}
             <div style={{ background: 'linear-gradient(135deg, #0077b6, #00b4d8)', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontWeight: 'bold', color: 'white', fontSize: '14px' }}>🤖 AI Maintenance Assistant</div>
@@ -692,7 +800,9 @@ export default function Dashboard() {
               {chatMessages.map((msg, i) => (
                 <div key={i} style={{
                   alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                  background: msg.role === 'user' ? 'linear-gradient(135deg, #0077b6, #00b4d8)' : '#1a1f35',
+                  background: msg.role === 'user'
+                    ? 'linear-gradient(135deg, #0077b6, #00b4d8)'
+                    : '#1a1f35',
                   padding: '9px 12px',
                   borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
                   maxWidth: '88%', fontSize: '12px', lineHeight: '1.5', color: 'white'
@@ -716,17 +826,16 @@ export default function Dashboard() {
                   <button key={i} onClick={() => sendChat(reply)} disabled={chatLoading} style={{
                     background: '#1a1f35', border: '1px solid #2a2f45',
                     color: '#999', padding: '4px 9px', borderRadius: '20px',
-                    cursor: chatLoading ? 'not-allowed' : 'pointer', fontSize: '10px',
-                    transition: 'all 0.15s'
+                    cursor: chatLoading ? 'not-allowed' : 'pointer', fontSize: '10px', transition: 'all 0.15s'
                   }}
-                    onMouseOver={e => { if (!chatLoading) { e.target.style.background = '#00e5ff22'; e.target.style.color = '#00e5ff'; e.target.style.borderColor = '#00e5ff44'; } }}
-                    onMouseOut={e => { e.target.style.background = '#1a1f35'; e.target.style.color = '#999'; e.target.style.borderColor = '#2a2f45'; }}
+                    onMouseOver={e => { if (!chatLoading) { e.target.style.background='#00e5ff22'; e.target.style.color='#00e5ff'; e.target.style.borderColor='#00e5ff44'; }}}
+                    onMouseOut={e  => { e.target.style.background='#1a1f35'; e.target.style.color='#999'; e.target.style.borderColor='#2a2f45'; }}
                   >{reply}</button>
                 ))}
               </div>
             </div>
 
-            {/* Input */}
+            {/* Input Row */}
             <div style={{ padding: '9px', borderTop: '1px solid #1a1f35', display: 'flex', gap: '7px', background: '#0d1117' }}>
               <input value={chatInput} onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && sendChat()}
@@ -751,6 +860,8 @@ export default function Dashboard() {
           {chatOpen ? '✕' : '🤖'}
         </button>
       </div>
+
+      <ReportGenerator machines={results.length > 0 ? results : allMachines} logs={logs} />
     </div>
   );
 }
