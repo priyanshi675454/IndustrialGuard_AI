@@ -5,7 +5,6 @@ import {
   BarChart, Bar, LineChart, Line, Cell
 } from 'recharts';
 import { jsPDF } from 'jspdf';
-import ReportGenerator from './ReportGenerator';
 
 const API = 'http://localhost:3001';
 
@@ -91,7 +90,7 @@ export default function Dashboard() {
   const [customResult,  setCustomResult]  = useState(null);
   const [customLoading, setCustomLoading] = useState(false);
   const [historyData,   setHistoryData]   = useState([]);
-  const [scanCount,     setScanCount]     = useState(0);
+  const [, setScanCount] = useState(0);
   const [chatOpen,      setChatOpen]      = useState(false);
   const [chatMessages,  setChatMessages]  = useState([
     { role: 'ai', text: '👋 Hi! I am IndustrialGuard AI Assistant. Ask me anything or pick a quick question below! Run a scan first for live machine data.' }
@@ -861,7 +860,6 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <ReportGenerator machines={results.length > 0 ? results : allMachines} logs={logs} />
     </div>
   );
 }
