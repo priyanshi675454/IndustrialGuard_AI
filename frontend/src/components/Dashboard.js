@@ -8,9 +8,7 @@ import { jsPDF } from 'jspdf';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
-// ── DEMO MODE ─────────────────────────────────────────────────────────────────
-// When on Vercel (no backend), simulate realistic AI+blockchain responses
-// so judges see a fully working live demo at the deployed URL.
+
 const DEMO_RISKS = { M001: 84, M002: 47, M003: 29, M004: 16, M005: 67 };
 
 const getDemoResult = (machine) => {
@@ -54,8 +52,7 @@ const getDemoChat = (message) => {
   return '🤖 Based on current sensor data: Turbine A (84% risk) needs immediate action. I can help with machine health analysis, maintenance scheduling, risk explanations, and sensor data interpretation. What would you like to know?';
 };
 
-// demo mode active when backend unreachable
-// ──────────────────────────────────────────────────────────────────────────────
+
 
 const defaultMachines = [
   { machine_id: 'M001', name: 'Turbine A',    temperature: 92, vibration: 55, pressure: 125, rpm: 3600, oil_level: 60, hours_run: 3000, sampleRisk: 84, sampleStatus: 'CRITICAL' },
